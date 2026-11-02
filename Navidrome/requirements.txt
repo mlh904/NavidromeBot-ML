@@ -1,0 +1,9 @@
+python-telegram-bot==21.7
+python-telegram-bot[rate-limiter]==21.7
+python-telegram-bot[job-queue]==21.7
+pymongo==4.9.1
+schedule==1.2.2
+pytz==2024.2
+aiohttp==3.13.3
+uvloop==0.21.0
+opencc-python-reimplemented==0.1.7

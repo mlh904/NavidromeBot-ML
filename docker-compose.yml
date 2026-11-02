@@ -1,0 +1,27 @@
+services:
+  mongo:
+    image: mongo:5.0
+    container_name: navidrome-bot-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: bot
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS}
+    volumes:
+      - ./data/db:/data/db
+    networks: [botnet]
+  bot:
+    build: .
+    image: navidrome-bot-ml:latest
+    container_name: navidrome-bot
+    restart: unless-stopped
+    depends_on: [mongo]
+    volumes:
+      - ./config.json:/app/Navidrome/config.json:ro
+      - ./data/db_backup:/app/Navidrome/db_backup
+      - ./data/logs:/app/Navidrome/logs
+    networks: [botnet, music]
+networks:
+  botnet: {}
+  music:
+    external: true
+    name: music-stack_default
