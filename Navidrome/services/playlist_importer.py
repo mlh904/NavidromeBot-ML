@@ -22,7 +22,7 @@ VERSION_WORDS = re.compile(
 FEAT = re.compile(r"\s*[-\s]?\s*(feat\.?|ft\.?|with)\s+.*$", re.I)
 PUNCT = re.compile(r"[\s\-_.,，。!！?？'’\"“”:：;；/\\|·•~～&＆+＋*]+")
 ARTIST_SPLIT = re.compile(r"\s*(?:/|;|；|、|&|，|,|\+|\bfeat\.?\b|\bft\.?\b|\band\b|和)\s*", re.I)
-CACHE_TTL = 600
+CACHE_TTL = 3600
 
 
 def to_simplified(text):
@@ -206,8 +206,14 @@ class PlaylistImporter:
 
     async def import_all(self, username, password, playlist):
         tracks = playlist["tracks"]
-        tasks = [self.import_to_server(c, username, password, playlist, tracks) for c in navidrome_service.clients]
-        return await asyncio.gather(*tasks)
+        # 限制同时导入的服务器数量，避免多台并发抢带宽导致互相超时
+        sem = asyncio.Semaphore(2)
+
+        async def run(client):
+            async with sem:
+                return await self.import_to_server(client, username, password, playlist, tracks)
+
+        return await asyncio.gather(*(run(c) for c in navidrome_service.clients))
 
 
 playlist_importer = PlaylistImporter()

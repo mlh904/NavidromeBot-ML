@@ -49,7 +49,7 @@ class NavidromeError(Exception):
 class NavidromeClient:
     """单台 Navidrome 的原生 REST API 封装。"""
 
-    def __init__(self, name, base_url, username, password, timeout=30):
+    def __init__(self, name, base_url, username, password, timeout=120):
         self.name = name
         self.base_url = base_url.rstrip("/")
         self.username = username
@@ -170,13 +170,29 @@ class NavidromeClient:
         return await self.request("PUT", f"/api/user/{user['id']}", payload)
 
     # ---------- 歌曲 / 歌单 ----------
-    async def list_songs(self, token=None, page_size=2000):
+    async def list_songs(self, token=None, page_size=2000, retries=2):
         songs, start = [], 0
         while True:
-            resp = await self.request("GET", "/api/song", params={
-                "_start": start, "_end": start + page_size, "_sort": "title", "_order": "ASC"}, token=token)
-            if not is_ok(resp) or not isinstance(resp.data, list):
-                raise NavidromeError(f"{self.name} 获取歌曲列表失败：{resp.message}")
+            resp, last_err = None, None
+            for attempt in range(retries + 1):
+                try:
+                    resp = await self.request("GET", "/api/song", params={
+                        "_start": start, "_end": start + page_size,
+                        "_sort": "title", "_order": "ASC"}, token=token)
+                    if not is_ok(resp) or not isinstance(resp.data, list):
+                        raise NavidromeError(f"{self.name} 获取歌曲列表失败：{resp.message}")
+                    last_err = None
+                    break
+                except NavidromeError as e:
+                    last_err = e
+                except Exception as e:  # noqa: BLE001
+                    last_err = NavidromeError(f"{self.name} 获取歌曲列表失败：{type(e).__name__}")
+                if attempt < retries:
+                    wait = 2 * (attempt + 1)
+                    logger.warning(f"[{self.name}] 曲库第 {start} 条起拉取失败，{wait} 秒后重试：{last_err}")
+                    await asyncio.sleep(wait)
+            if last_err is not None:
+                raise last_err
             songs.extend(resp.data)
             if len(resp.data) < page_size or (resp.total is not None and len(songs) >= resp.total):
                 return songs
@@ -269,19 +285,35 @@ class MultiNavidromeService:
         resp = await client.delete_user_by_id(user["id"])
         return (True, None) if is_ok(resp) else (False, resp.message)
 
-    async def _ensure_on(self, client, username, name, password):
+    async def _ensure_on(self, client, username, name, password, allow_create=True):
         """确保该服务器上有此用户且密码为 password。返回 (成功?, 远端用户, 错误信息)。"""
         try:
             user = await client.find_user(username)
         except NavidromeError as e:
             return False, None, str(e)
         if user is None:
+            if not allow_create:
+                return False, None, "账号不存在"
             resp = await client.create_user(username, name, password)
             return (True, resp.data, None) if is_ok(resp) else (False, None, resp.message)
-        if user.get("isAdmin"):
-            return True, user, None
+        # 机器人自己用来登录的账号不能改密码，否则会立刻失去所有线路的访问权限
+        if str(username).lower() == str(client.username).lower():
+            return False, user, "这是机器人自己使用的账号，改密码会导致机器人失联"
+
+        # 管理员账号同样允许改密码（原先这里直接跳过，导致“提示成功但没改”）
         resp = await client.set_password(user, name, password)
-        return (True, user, None) if is_ok(resp) else (False, user, resp.message)
+        if not is_ok(resp):
+            return False, user, resp.message
+        # 改完立刻验证一次，避免接口返回 2xx 但实际没生效
+        try:
+            check = await client.find_user(username)
+            if check is not None:
+                ok_login = await client.login_as(username, password)
+                if not ok_login:
+                    return False, user, "密码未生效"
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[{client.name}] 校验新密码失败：{type(e).__name__}")
+        return True, user, None
 
     # ---------- 对外接口（与原版同名，handlers 无需大改） ----------
     async def refresh_bearer_token(self):
@@ -351,17 +383,26 @@ class MultiNavidromeService:
         return ApiResponse(200, "删除成功", {"failed": []})
 
     async def reset_password(self, user_id, name, username, new_password):
-        failed, primary_ok = [], False
+        failed, reasons, primary_ok = [], {}, False
         for c in self.clients:
-            ok, _, err = await self._ensure_on(c, username, name, new_password)
+            ok, _, err = await self._ensure_on(c, username, name, new_password, allow_create=False)
             if ok:
                 self._clear_pending(c.name, username)
                 primary_ok = primary_ok or c is self.primary
             else:
                 failed.append(c.name)
+                if err:
+                    reasons[c.name] = err
                 self._set_pending(c.name, "password", username, err)
+
         if not primary_ok:
-            return ApiResponse(ResponseCode.SERVER_ERROR, f"重置密码失败：{self.primary.name} 暂时连不上，请稍后再试")
+            # 优先回传真实原因，而不是一律说“连不上”
+            why = reasons.get(self.primary.name) or next(iter(reasons.values()), "")
+            if why:
+                return ApiResponse(ResponseCode.SERVER_ERROR, f"重置密码失败：{why}")
+            return ApiResponse(ResponseCode.SERVER_ERROR,
+                               f"重置密码失败：{self.primary.name} 暂时连不上，请稍后再试")
+
         msg = "重置成功" if not failed else f"重置成功；{'、'.join(failed)} 暂时连不上，稍后自动补同步"
         return ApiResponse(200, msg, {"failed": failed})
 

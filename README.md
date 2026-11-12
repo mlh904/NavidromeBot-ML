@@ -5,6 +5,7 @@ Telegram Navidrome account bot with multi-server synchronization and playlist im
 ## Features
 
 - Create, delete and reset Navidrome users
+- Bind / unbind an existing account to a Telegram user (`/bind`, `/unbind`, `/mybind`)
 - Synchronize users across multiple Navidrome servers
 - Pending synchronization queue and `/sync`
 - `/health` server health check
@@ -31,10 +32,28 @@ docker compose up -d --build
 
 Configure the `NAVIDROME_SERVERS` array in `config.json`. The first server is the primary server. Additional servers are synchronized by username. After adding a server, an administrator can run `/sync`.
 
+## Account binding
+
+If a user already has an account on the Navidrome servers but the bot database has
+no record for it (for example after an incomplete restore), the user can link the
+account themselves:
+
+```text
+/bind              enter account name, then the account password
+/bind <username>   same, in one step
+/unbind            remove the Telegram link (the Navidrome account is kept)
+/mybind            show the current link
+```
+
+The password is verified against Navidrome's `/auth/login` and is **never stored**.
+An account already linked to another Telegram user is rejected. Unbinding only
+removes the database record and leaves the music account untouched, so it can be
+bound again later.
+
 ## Playlist import
 
 Users can send `/gd <playlist URL>` in a private chat. The bot reports matched and missing songs. External playlist web interfaces may change and require maintenance.
 
 ## Version
 
-0.1.0-ml (2026-11-02)
+0.2.0-ml (2026-11-12)

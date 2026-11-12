@@ -12,13 +12,17 @@ async def set_bot_command(context):
     logger.info("set bot command job start")
     default_private_commands = [BotCommand('start', '开启主面板'),
                                 BotCommand('gd', '导入歌单：/gd 歌单链接'),
+                                BotCommand('bind', '绑定已有账号'),
+                                BotCommand('unbind', '解除账号绑定'),
+                                BotCommand('mybind', '查看当前绑定'),
                                 BotCommand('health', '检查 Navidrome 线路状态'),
                                 ]
     default_group_commands = []
     admin_private_commands = default_private_commands + [
         BotCommand('help', '查看帮助信息'),
         BotCommand('new_code', '创建新的兑换码'),
-        BotCommand('del_user', '回复消息或tgid删除Navirome账号'),
+        BotCommand('del_user', '删除账号：/del_user 账号名'),
+        BotCommand('reset_pw', '重置密码：/reset_pw 账号 新密码'),
         BotCommand('new_line', '新增或修改线路'),
         BotCommand('del_line', '删除线路'),
         BotCommand('mm', '查看用户信息'),
